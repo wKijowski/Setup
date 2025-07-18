@@ -1,66 +1,59 @@
-# Creating the updated setup script content as a string based on the user's partition and login manager preferences
+#!/bin/bash
+LOG="/var/log/arch-setup.log"
+exec > >(tee -a "$LOG") 2>&1
 
-script_content = """#!/bin/bash
-# Лог файл
-LOGFILE="/var/log/arch-setup.log"
-exec > >(tee -a "$LOGFILE") 2>&1
+echo "[*] Обновление ключей и базы..."
+pacman -Sy --noconfirm archlinux-keyring
 
-set -e
+echo "[*] Установка базовых пакетов..."
+pacman -S --noconfirm base base-devel linux linux-firmware linux-headers \
+    networkmanager grub efibootmgr sudo nano git reflector intel-ucode \
+    pipewire pipewire-pulse wireplumber alsa-utils sof-firmware \
+    xorg-server mesa vulkan-intel xf86-video-intel ly
 
-echo "=== Обновляем зеркала и устанавливаем базовые пакеты ==="
-pacman -Syyu --noconfirm
-pacman -S --noconfirm linux linux-firmware base base-devel \
-    networkmanager grub efibootmgr intel-ucode \
-    git pipewire wireplumber pipewire-audio pipewire-alsa pipewire-pulse \
-    xdg-desktop-portal xdg-desktop-portal-hyprland \
-    hyprland kitty thunar wofi chromium grim wl-clipboard \
-    nano vim neofetch sudo \
-    mesa libva-intel-driver vulkan-intel \
-    ly
+echo "[*] Генерация fstab..."
+genfstab -U /mnt >> /mnt/etc/fstab
 
-echo "=== Устанавливаем часовой пояс, локаль, hostname ==="
+echo "[*] Настройка локали и времени..."
 ln -sf /usr/share/zoneinfo/UTC /etc/localtime
 hwclock --systohc
-
-echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
+sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
 locale-gen
-
 echo "LANG=en_US.UTF-8" > /etc/locale.conf
 echo "KEYMAP=us" > /etc/vconsole.conf
 
+echo "[*] Настройка hostname и hosts..."
 echo "archpc" > /etc/hostname
 cat <<EOF > /etc/hosts
-127.0.0.1   localhost
-::1         localhost
-127.0.1.1   archpc.localdomain archpc
+127.0.0.1 localhost
+::1       localhost
+127.0.1.1 archpc.localdomain archpc
 EOF
 
-echo "=== Устанавливаем загрузчик GRUB ==="
-mkdir -p /boot/efi
-mount /dev/sda1 /boot/efi
-grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB
-grub-mkconfig -o /boot/grub/grub.cfg
-
-echo "=== Настраиваем SWAP ==="
+echo "[*] Включение swap..."
 mkswap /dev/sda2
 swapon /dev/sda2
 
-echo "=== Создаём пользователя ==="
-echo "root:1234" | chpasswd
-useradd -m -G wheel -s /bin/bash wk
-echo "wk:1234" | chpasswd
-echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
+echo "[*] Установка загрузчика grub (EFI)..."
+mkdir -p /boot/EFI
+grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
+grub-mkconfig -o /boot/grub/grub.cfg
 
-echo "=== Включаем службы ==="
+echo "[*] Включение служб..."
 systemctl enable NetworkManager
 systemctl enable ly
 
-echo "=== Установка завершена успешно ==="
-"""
+echo "[*] Добавление пользователя..."
+useradd -m -G wheel -s /bin/bash wk
+echo "wk:1234" | chpasswd
+echo "root:1234" | chpasswd
 
-# Save script to a file
-script_path = "/mnt/data/arch-setup.sh"
-with open(script_path, "w") as f:
-    f.write(script_content)
+echo "[*] Разрешение sudo для wheel..."
+sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
-script_path
+echo "[*] Установка Hyprland и зависимостей..."
+pacman -S --noconfirm hyprland kitty waybar wofi thunar grim slurp wl-clipboard \
+    qt5-wayland qt6-wayland qt5ct qt6ct xdg-desktop-portal-hyprland xdg-utils \
+    xdg-user-dirs
+
+echo "[*] Установка завершена. Проверьте лог: $LOG"
